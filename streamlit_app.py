@@ -2,30 +2,27 @@ import streamlit as st
 import spacy
 import fitz  # PyMuPDF
 from collections import Counter
-import re
 
-# Use lightweight blank English model
-nlp = spacy.blank("en")
+# Load spaCy model
+try:
+    nlp = spacy.load("en_core_web_sm")
+except:
+    st.error("⚠️ spaCy model not found. Please install it using:\n`python -m spacy download en_core_web_sm`")
+    st.stop()
 
-# Add tagger if missing
-if "tagger" not in nlp.pipe_names:
-    from spacy.pipeline import Tagger
-    tagger = Tagger(nlp.vocab)
-    nlp.add_pipe("tagger")
-
-# Stop words to ignore
+# Common words to ignore
 common_words = set("""
 i me my myself we our ours you your yours he him his she her hers they them their what which who whom this that these those am is are was were be been being have has had do does did a an the and but if or because as until while of at by for with about against between into through during before after to from in out on off over under again further then once here there all any both each few more most other some such no nor not only own same so than too very can will just ok okay
 """.split())
 
-# Extract technical keywords
+# Extract keywords
 def extract_technical_keywords(text):
     doc = nlp(text)
     keywords = [token.text.lower() for token in doc if token.pos_ in ["NOUN", "PROPN", "VERB"] and len(token.text) > 2]
     filtered = [word for word in keywords if word.isalpha() and word not in common_words]
     return Counter(filtered)
 
-# Extract text from PDF
+# Extract from PDF
 def extract_text_from_pdf(file):
     with fitz.open(stream=file.read(), filetype="pdf") as doc:
         return "\n".join([page.get_text() for page in doc])
