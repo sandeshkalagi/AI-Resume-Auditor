@@ -153,4 +153,4 @@ if uploaded_file is not None:
 
 # Footer
 st.markdown("---")
-st.markdown("<p style='text-align: center; font-size: 13px;'>Built with ❤️ by <b>Sandesh Kalagi</b></p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 13px;'>Built with  by <b>Sandesh Kalagi</b></p>", unsafe_allow_html=True)
