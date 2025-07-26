@@ -63,6 +63,13 @@ if uploaded_file is not None:
         jd_words = set(jd_keywords.keys())
         missing_keywords = jd_words - resume_words
 
+        # Calculate match percentage
+        matched_keywords = jd_words.intersection(resume_words)
+        if len(jd_words) > 0:
+            match_percent = round((len(matched_keywords) / len(jd_words)) * 100, 2)
+        else:
+            match_percent = 0.0
+
         st.subheader("🤝 Match with Job Description")
         if missing_keywords:
             st.warning("⚠️ Your resume may be missing some key terms from the job description:")
@@ -70,6 +77,10 @@ if uploaded_file is not None:
                 st.write(f"➕ Consider adding: **{word}**")
         else:
             st.success("✅ Great! Your resume covers most of the job description's keywords.")
+
+        st.subheader("📊 Resume Match Score")
+        st.progress(int(match_percent))
+        st.info(f"✅ Your resume matches **{match_percent}%** of the job description keywords.")
 
 # Footer
 st.markdown("---")
