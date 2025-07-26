@@ -2,86 +2,155 @@ import streamlit as st
 import spacy
 import fitz  # PyMuPDF
 from collections import Counter
+from io import BytesIO
+from reportlab.pdfgen import canvas
+import openai
+import os
+from dotenv import load_dotenv
+
+# Load .env file and OpenAI key
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Load spaCy model
 try:
     nlp = spacy.load("en_core_web_sm")
 except:
-    st.error("⚠️ spaCy model not found. Please install it using:\n`python -m spacy download en_core_web_sm`")
+    st.error("⚠️ spaCy model not found. Install it using: `python -m spacy download en_core_web_sm`")
     st.stop()
 
-# Common words to ignore
+# Common non-technical words
 common_words = set("""
 i me my myself we our ours you your yours he him his she her hers they them their what which who whom this that these those am is are was were be been being have has had do does did a an the and but if or because as until while of at by for with about against between into through during before after to from in out on off over under again further then once here there all any both each few more most other some such no nor not only own same so than too very can will just ok okay
 """.split())
 
-# Extract technical keywords
+# Extract keywords
 def extract_technical_keywords(text):
     doc = nlp(text)
     keywords = [token.text.lower() for token in doc if token.pos_ in ["NOUN", "PROPN", "VERB"] and len(token.text) > 2]
     filtered = [word for word in keywords if word.isalpha() and word not in common_words]
     return Counter(filtered)
 
-# Extract text from PDF
+# Read PDF text
 def extract_text_from_pdf(file):
     with fitz.open(stream=file.read(), filetype="pdf") as doc:
         return "\n".join([page.get_text() for page in doc])
 
-# ---- Streamlit Interface ----
+# Generate GPT feedback
+def generate_feedback(resume_text, job_text):
+    prompt = f"""
+You are a cybersecurity resume expert.
+Analyze this resume and job description.
+Suggest improvements (skills to add, clarity, buzzwords, etc.)
+
+Resume:
+{resume_text[:1500]}
+
+Job Description:
+{job_text[:1500]}
+
+Give concise feedback (max 100 words).
+"""
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return "⚠️ Error generating GPT feedback. Check your API key or usage limit."
+
+# Create a PDF report
+def create_pdf_report(name, keywords, missing, percent, feedback):
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer)
+    p.setFont("Helvetica-Bold", 16)
+    p.drawString(50, 800, "AI Resume Audit Report")
+
+    p.setFont("Helvetica", 12)
+    y = 770
+    p.drawString(50, y, f"Name: {name}")
+    y -= 20
+    p.drawString(50, y, f"Match Score: {percent}%")
+    y -= 30
+
+    p.drawString(50, y, "Top Keywords in Resume:")
+    for word, freq in keywords:
+        y -= 15
+        p.drawString(60, y, f"{word} — {freq} times")
+
+    y -= 30
+    p.drawString(50, y, "Missing Keywords from JD:")
+    for word in list(missing)[:10]:
+        y -= 15
+        p.drawString(60, y, f"{word}")
+
+    y -= 30
+    p.drawString(50, y, "GPT Feedback:")
+    lines = feedback.split('\n')
+    for line in lines:
+        for chunk in [line[i:i+80] for i in range(0, len(line), 80)]:
+            y -= 15
+            p.drawString(60, y, chunk)
+
+    p.save()
+    buffer.seek(0)
+    return buffer
+
+# --- UI START ---
 st.title("🧠 AI-Powered Resume Auditor")
-st.markdown("Upload your resume and job description to get smart keyword suggestions.")
+st.markdown("Upload your resume and job description to receive smart keyword analysis and GPT feedback.")
 
-# 📄 Upload Resume
-uploaded_file = st.file_uploader("📄 Upload your Resume (.pdf or .txt)", type=["txt", "pdf"])
-
-# 📌 Paste Job Description
+uploaded_file = st.file_uploader("📄 Upload Resume (.pdf or .txt)", type=["pdf", "txt"])
 st.subheader("📌 Paste Job Description")
-job_desc = st.text_area("Enter the job description for the role you're applying to:", height=200)
+job_desc = st.text_area("Enter job description:", height=200)
 
 if uploaded_file is not None:
     if uploaded_file.name.endswith(".pdf"):
-        content = extract_text_from_pdf(uploaded_file)
+        resume_text = extract_text_from_pdf(uploaded_file)
     else:
-        content = uploaded_file.read().decode("utf-8")
+        resume_text = uploaded_file.read().decode("utf-8")
 
-    # 🔍 Resume Analysis
     st.subheader("🔍 Resume Keyword Analysis")
-    keywords = extract_technical_keywords(content)
-    most_common = keywords.most_common(15)
+    resume_keywords = extract_technical_keywords(resume_text)
+    top_keywords = resume_keywords.most_common(15)
 
-    if most_common:
-        st.markdown("**Top Technical Keywords Detected:**")
-        for word, freq in most_common:
+    if top_keywords:
+        st.markdown("**Top Technical Keywords:**")
+        for word, freq in top_keywords:
             st.write(f"🔹 {word} — {freq} times")
     else:
-        st.warning("No strong technical keywords found. Try adding more domain-specific skills.")
+        st.warning("No strong technical keywords found.")
 
-    # 🤖 Compare with Job Description
     if job_desc:
         jd_keywords = extract_technical_keywords(job_desc)
-        resume_words = set(keywords.keys())
-        jd_words = set(jd_keywords.keys())
-        missing_keywords = jd_words - resume_words
-
-        # Calculate match percentage
-        matched_keywords = jd_words.intersection(resume_words)
-        if len(jd_words) > 0:
-            match_percent = round((len(matched_keywords) / len(jd_words)) * 100, 2)
-        else:
-            match_percent = 0.0
+        resume_set = set(resume_keywords.keys())
+        jd_set = set(jd_keywords.keys())
+        missing = jd_set - resume_set
+        matched = jd_set & resume_set
+        match_percent = round((len(matched) / len(jd_set)) * 100, 2) if jd_set else 0.0
 
         st.subheader("🤝 Match with Job Description")
-        if missing_keywords:
-            st.warning("⚠️ Your resume may be missing some key terms from the job description:")
-            for word in list(missing_keywords)[:10]:
-                st.write(f"➕ Consider adding: **{word}**")
+        if missing:
+            st.warning("Missing terms from JD:")
+            for word in list(missing)[:10]:
+                st.write(f"➕ {word}")
         else:
-            st.success("✅ Great! Your resume covers most of the job description's keywords.")
+            st.success("✅ Resume covers all key job terms.")
 
         st.subheader("📊 Resume Match Score")
         st.progress(int(match_percent))
-        st.info(f"✅ Your resume matches **{match_percent}%** of the job description keywords.")
+        st.info(f"✅ Your resume matches **{match_percent}%** of the job description.")
+
+        st.subheader("🧠 GPT Feedback")
+        with st.spinner("Analyzing with GPT..."):
+            feedback = generate_feedback(resume_text, job_desc)
+        st.success(feedback)
+
+        # 🎯 PDF Report Button
+        st.subheader("📥 Download PDF Report")
+        pdf = create_pdf_report("Sandesh Kalagi", top_keywords, missing, match_percent, feedback)
+        st.download_button("Download Report", data=pdf, file_name="resume_audit_report.pdf", mime="application/pdf")
 
 # Footer
 st.markdown("---")
-st.markdown("<p style='text-align: center; font-size: 13px;'>Built by <b>Sandesh Kalagi</b> ⚙️</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 13px;'>Built with ❤️ by <b>Sandesh Kalagi</b></p>", unsafe_allow_html=True)
